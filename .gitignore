@@ -1,14 +1,12 @@
-# ---------- Angular ----------
+# Angular
 node_modules/
 dist/
 .angular/
-.env
 
-# ---------- Spring Boot ----------
+# Spring Boot
 target/
-application.properties
-application.yml
-
-# ---------- Logs & OS ----------
 *.log
+
+# System
 .DS_Store
+*.class
