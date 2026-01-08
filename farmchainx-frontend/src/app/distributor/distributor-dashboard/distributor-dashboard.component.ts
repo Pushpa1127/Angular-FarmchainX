@@ -5,6 +5,10 @@ import { HttpClient } from '@angular/common/http';
 import { AuthService } from '../../core/services/auth.service';
 import { BatchCardComponent } from '../batch-card/batch-card.component';
 
+// 🔔 Notification imports
+import { NotificationService } from '../../notification/services/notification.service';
+import { Notification } from '../../notification/models/notification.model';
+
 @Component({
   selector: 'app-distributor-dashboard',
   standalone: true,
@@ -14,6 +18,11 @@ import { BatchCardComponent } from '../batch-card/batch-card.component';
 export class DistributorDashboardComponent implements OnInit {
 
   distributorId!: number;
+
+  /* 🔔 NOTIFICATIONS */
+  notifications: Notification[] = [];
+  unreadCount = 0;
+  showNotifications = false;
 
   tab: 'BATCHES' | 'ORDERS' | 'HISTORY' = 'BATCHES';
   tabs: Array<'BATCHES' | 'ORDERS' | 'HISTORY'> = ['BATCHES', 'ORDERS', 'HISTORY'];
@@ -27,16 +36,44 @@ export class DistributorDashboardComponent implements OnInit {
   constructor(
     private http: HttpClient,
     private auth: AuthService,
-    private router: Router
+    private router: Router,
+    private notificationService: NotificationService
   ) {}
 
   ngOnInit(): void {
     const user = this.auth.userValue;
     if (!user) return;
 
-    this.distributorId = user.id;
+    this.distributorId = user.id || user.distributorId;
+
     this.fetchBatches();
     this.fetchOrders();
+    this.loadNotifications();
+  }
+
+  /* 🔔 ---------------- NOTIFICATIONS ---------------- */
+
+  loadNotifications(): void {
+    this.notificationService
+      .getNotifications(this.distributorId.toString(), 'DISTRIBUTOR')
+      .subscribe(res => this.notifications = res || []);
+
+    this.notificationService
+      .getUnreadCount(this.distributorId.toString(), 'DISTRIBUTOR')
+      .subscribe(count => this.unreadCount = count || 0);
+  }
+
+  toggleNotifications(): void {
+    this.showNotifications = !this.showNotifications;
+  }
+
+  markAsRead(notification: Notification): void {
+    if (notification.read) return;
+
+    this.notificationService.markAsRead(notification.id).subscribe(() => {
+      notification.read = true;
+      this.unreadCount = Math.max(0, this.unreadCount - 1);
+    });
   }
 
   /* ---------------- BATCHES ---------------- */
@@ -52,9 +89,9 @@ export class DistributorDashboardComponent implements OnInit {
   approveBatch(batchId: string): void {
     this.http
       .put(`${this.API}/batches/distributor/approve/${batchId}/${this.distributorId}`, {})
-      .subscribe({
-        next: () => this.fetchBatches(),
-        error: () => alert('Failed to approve batch')
+      .subscribe(() => {
+        this.fetchBatches();
+        this.loadNotifications();
       });
   }
 
@@ -64,16 +101,15 @@ export class DistributorDashboardComponent implements OnInit {
 
     this.http
       .put(`${this.API}/batches/distributor/reject/${batchId}/${this.distributorId}`, { reason })
-      .subscribe({
-        next: () => this.fetchBatches(),
-        error: () => alert('Failed to reject batch')
+      .subscribe(() => {
+        this.fetchBatches();
+        this.loadNotifications();
       });
   }
 
- goToTrace(batchId: string): void {
-  window.open(`http://localhost:4200/trace/${batchId}`, '_blank');
-}
-
+  goToTrace(batchId: string): void {
+    window.open(`http://localhost:4200/trace/${batchId}`, '_blank');
+  }
 
   /* ---------------- ORDERS ---------------- */
 
@@ -86,10 +122,28 @@ export class DistributorDashboardComponent implements OnInit {
       });
   }
 
-  updateStatus(orderId: number, status: string): void {
-    this.http.put(`${this.API}/orders/${orderId}/status`, null, {
-      params: { status, distributorId: this.distributorId }
-    }).subscribe(() => this.fetchOrders());
+  updateStatus(order: any, status: string): void {
+    let location: string | null = null;
+
+    // Ask for location if moving to Warehouse or Transit
+    if (status === 'IN_WAREHOUSE') {
+      location = prompt('Enter warehouse location:');
+      if (!location) return;
+    } else if (status === 'IN_TRANSIT') {
+      location = prompt('Enter transit location:');
+      if (!location) return;
+    }
+
+    this.http.put(`${this.API}/orders/${order.orderId}/status`, null, {
+      params: {
+        status,
+        distributorId: this.distributorId,
+        location: location || ''
+      }
+    }).subscribe(() => {
+      this.fetchOrders();
+      this.loadNotifications();
+    });
   }
 
   cancelOrder(orderId: number): void {
@@ -98,26 +152,29 @@ export class DistributorDashboardComponent implements OnInit {
 
     this.http.put(`${this.API}/orders/${orderId}/cancel`, null, {
       params: { distributorId: this.distributorId, reason }
-    }).subscribe(() => this.fetchOrders());
+    }).subscribe(() => {
+      this.fetchOrders();
+      this.loadNotifications();
+    });
   }
 
   /* ---------------- FILTERS ---------------- */
+
   onTabChange(t: 'BATCHES' | 'ORDERS' | 'HISTORY') {
     this.tab = t;
-
     if (t === 'ORDERS' || t === 'HISTORY') {
       this.fetchOrders();
     }
   }
 
-  /* ---------------- COMPUTED (SAFE LOGIC) ---------------- */
+  /* ---------------- COMPUTED ---------------- */
 
   get liveOrders() {
     return this.orders.filter(o => o?.status && o.status !== 'DELIVERED');
   }
 
   get historyOrders() {
-    return this.orders.filter(o => o?.status && o.status === 'DELIVERED');
+    return this.orders.filter(o => o?.status === 'DELIVERED');
   }
 
   get totalDistributorEarnings() {

@@ -64,7 +64,7 @@ public class OrderService {
     /* ================= UPDATE STATUS ================= */
 
     @Transactional
-    public Order updateOrderStatus(Long orderId, OrderStatus status, String distributorId) {
+    public Order updateOrderStatus(Long orderId, OrderStatus status, String distributorId, String location) {
 
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found"));
@@ -75,11 +75,19 @@ public class OrderService {
         order.setStatus(status);
         order.setUpdatedAt(LocalDateTime.now());
 
-        if (status == OrderStatus.IN_WAREHOUSE && order.getWarehouseAt() == null)
-            order.setWarehouseAt(LocalDateTime.now());
+        if (status == OrderStatus.IN_WAREHOUSE) {
+            if (order.getWarehouseAt() == null)
+                order.setWarehouseAt(LocalDateTime.now());
+            if (location != null && !location.isBlank())
+                order.setWarehouseLocation(location);
+        }
 
-        if (status == OrderStatus.IN_TRANSIT && order.getInTransitAt() == null)
-            order.setInTransitAt(LocalDateTime.now());
+        if (status == OrderStatus.IN_TRANSIT) {
+            if (order.getInTransitAt() == null)
+                order.setInTransitAt(LocalDateTime.now());
+            if (location != null && !location.isBlank())
+                order.setTransitLocation(location);
+        }
 
         if (status == OrderStatus.DELIVERED && order.getDeliveredAt() == null) {
             order.setDeliveredAt(LocalDateTime.now());
@@ -88,6 +96,7 @@ public class OrderService {
 
         return orderRepository.save(order);
     }
+
 
     /* ================= CONSUMER CANCEL ================= */
 
@@ -128,66 +137,69 @@ public class OrderService {
 
     private OrderDetailsDTO buildSafeDTO(Order order) {
 
-    try {
-        Listing listing = listingRepository.findById(order.getListingId()).orElse(null);
-        if (listing == null) return null;
+        try {
+            Listing listing = listingRepository.findById(order.getListingId()).orElse(null);
+            if (listing == null) return null;
 
-        Crop crop = listing.getCropId() != null
-                ? cropRepository.findById(listing.getCropId()).orElse(null)
-                : null;
+            Crop crop = listing.getCropId() != null
+                    ? cropRepository.findById(listing.getCropId()).orElse(null)
+                    : null;
 
-        User farmer = listing.getFarmerId() != null
-                ? userRepository.findById(listing.getFarmerId()).orElse(null)
-                : null;
+            User farmer = listing.getFarmerId() != null
+                    ? userRepository.findById(listing.getFarmerId()).orElse(null)
+                    : null;
 
-        User distributor = order.getDistributorId() != null
-                ? userRepository.findById(order.getDistributorId()).orElse(null)
-                : null;
+            User distributor = order.getDistributorId() != null
+                    ? userRepository.findById(order.getDistributorId()).orElse(null)
+                    : null;
 
-        OrderDetailsDTO dto = new OrderDetailsDTO();
+            OrderDetailsDTO dto = new OrderDetailsDTO();
 
-        dto.setOrderId(order.getOrderId());
-        dto.setOrderCode("ORD-" + order.getOrderId());
-        dto.setQuantity(order.getQuantity());
-        dto.setPricePerKg(order.getPricePerKg());
-        dto.setTotalAmount(order.getTotalAmount());
-        dto.setStatus(order.getStatus());
-        dto.setCancelReason(order.getCancelReason());
+            dto.setOrderId(order.getOrderId());
+            dto.setOrderCode("ORD-" + order.getOrderId());
+            dto.setQuantity(order.getQuantity());
+            dto.setPricePerKg(order.getPricePerKg());
+            dto.setTotalAmount(order.getTotalAmount());
+            dto.setStatus(order.getStatus());
+            dto.setCancelReason(order.getCancelReason());
 
-        dto.setExpectedDelivery(order.getExpectedDelivery());
-        dto.setCreatedAt(order.getCreatedAt());
-        dto.setWarehouseAt(order.getWarehouseAt());
-        dto.setInTransitAt(order.getInTransitAt());
-        dto.setDeliveredAt(order.getDeliveredAt());
-        dto.setCancelledAt(order.getCancelledAt());
+            dto.setExpectedDelivery(order.getExpectedDelivery());
+            dto.setCreatedAt(order.getCreatedAt());
+            dto.setWarehouseAt(order.getWarehouseAt());
+            dto.setInTransitAt(order.getInTransitAt());
+            dto.setDeliveredAt(order.getDeliveredAt());
+            dto.setCancelledAt(order.getCancelledAt());
+            dto.setWarehouseLocation(order.getWarehouseLocation());
+            dto.setTransitLocation(order.getTransitLocation());
+            dto.setConsumerId(order.getConsumerId());
 
-        dto.setDeliveryAddress(order.getDeliveryAddress());
-        dto.setContactNumber(order.getContactNumber());
+            dto.setDeliveryAddress(order.getDeliveryAddress());
+            dto.setContactNumber(order.getContactNumber());
 
-        if (crop != null) {
-            dto.setCropName(crop.getCropName());
-            dto.setCropType(crop.getCropType());
-            dto.setCropImageUrl(crop.getCropImageUrl());
+            if (crop != null) {
+                dto.setCropName(crop.getCropName());
+                dto.setCropType(crop.getCropType());
+                dto.setCropImageUrl(crop.getCropImageUrl());
+            }
+
+            if (farmer != null) {
+                dto.setFarmerName(farmer.getName());
+                dto.setFarmerContact(farmer.getPhone());
+            }
+
+            if (distributor != null) {
+                dto.setDistributorName(distributor.getName());
+                dto.setDistributorContact(distributor.getPhone());
+            }
+
+            return dto;
+
+        } catch (Exception e) {
+            System.err.println("❌ Failed to build OrderDetailsDTO for order " + order.getOrderId());
+            e.printStackTrace();
+            return null; // NEVER crash API
         }
-
-        if (farmer != null) {
-            dto.setFarmerName(farmer.getName());
-            dto.setFarmerContact(farmer.getPhone());
-        }
-
-        if (distributor != null) {
-            dto.setDistributorName(distributor.getName());
-            dto.setDistributorContact(distributor.getPhone());
-        }
-
-        return dto;
-
-    } catch (Exception e) {
-        System.err.println("❌ Failed to build OrderDetailsDTO for order " + order.getOrderId());
-        e.printStackTrace();
-        return null; // NEVER crash API
     }
-}
 
     /* ================= PAYMENT ================= */
 
@@ -200,28 +212,28 @@ public class OrderService {
     }
     /* ================= BASIC FETCH (REQUIRED BY CONTROLLER) ================= */
 
-public List<Order> getOrdersByConsumer(String consumerId) {
-    return orderRepository.findByConsumerId(consumerId);
-}
-
-public List<Order> getOrdersByFarmer(String farmerId) {
-    return orderRepository.findByFarmerId(farmerId);
-}
-
-@Transactional
-public Order setExpectedDelivery(Long orderId, String distributorId, LocalDateTime expectedDelivery) {
-
-    Order order = orderRepository.findById(orderId)
-            .orElseThrow(() -> new RuntimeException("Order not found"));
-
-    if (!order.getDistributorId().equals(distributorId)) {
-        throw new RuntimeException("Unauthorized distributor");
+    public List<Order> getOrdersByConsumer(String consumerId) {
+        return orderRepository.findByConsumerId(consumerId);
     }
 
-    order.setExpectedDelivery(expectedDelivery);
-    order.setUpdatedAt(LocalDateTime.now());
+    public List<Order> getOrdersByFarmer(String farmerId) {
+        return orderRepository.findByFarmerId(farmerId);
+    }
 
-    return orderRepository.save(order);
-}
+    @Transactional
+    public Order setExpectedDelivery(Long orderId, String distributorId, LocalDateTime expectedDelivery) {
+
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Order not found"));
+
+        if (!order.getDistributorId().equals(distributorId)) {
+            throw new RuntimeException("Unauthorized distributor");
+        }
+
+        order.setExpectedDelivery(expectedDelivery);
+        order.setUpdatedAt(LocalDateTime.now());
+
+        return orderRepository.save(order);
+    }
 
 }
