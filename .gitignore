@@ -7,6 +7,9 @@ dist/
 target/
 *.log
 
+# Environment / API keys
+.env
+
 # System
 .DS_Store
 *.class
